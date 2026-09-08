@@ -1,0 +1,5 @@
+unzip food-tracker-app.zip
+cd food-tracker-app
+git log        # you'll see the initial commit already made
+git remote add origin <your-github-repo-url>
+git push -u origin main
