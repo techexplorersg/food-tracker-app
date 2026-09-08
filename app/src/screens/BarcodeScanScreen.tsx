@@ -1,37 +1,39 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { View, Text, StyleSheet, Button } from 'react-native';
-import { BarCodeScanner } from 'expo-barcode-scanner';
+import { CameraView, useCameraPermissions } from 'expo-camera';
 
 import { lookupBarcode, describeHealthScore } from '../lib/openFoodFacts';
 import { PackagedFoodScanResult } from '../types';
 
 export default function BarcodeScanScreen() {
-  const [hasPermission, setHasPermission] = useState<boolean | null>(null);
+  const [permission, requestPermission] = useCameraPermissions();
   const [scanned, setScanned] = useState(false);
   const [result, setResult] = useState<PackagedFoodScanResult | null>(null);
 
-  useEffect(() => {
-    (async () => {
-      const { status } = await BarCodeScanner.requestPermissionsAsync();
-      setHasPermission(status === 'granted');
-    })();
-  }, []);
-
   async function handleScan({ data }: { data: string }) {
+    if (scanned) return;
     setScanned(true);
     const product = await lookupBarcode(data);
     setResult(product);
   }
 
-  if (hasPermission === null) return <Text>Requesting camera permission...</Text>;
-  if (hasPermission === false) return <Text>No access to camera.</Text>;
+  if (!permission) return <Text>Loading camera permissions...</Text>;
+  if (!permission.granted) {
+    return (
+      <View style={styles.container}>
+        <Text>We need camera access to scan barcodes.</Text>
+        <Button title="Grant Permission" onPress={requestPermission} />
+      </View>
+    );
+  }
 
   return (
     <View style={styles.container}>
       {!scanned && (
-        <BarCodeScanner
-          onBarCodeScanned={handleScan}
+        <CameraView
           style={StyleSheet.absoluteFillObject}
+          barcodeScannerSettings={{ barcodeTypes: ['ean13', 'ean8', 'upc_a', 'qr'] }}
+          onBarcodeScanned={handleScan}
         />
       )}
 
@@ -44,7 +46,6 @@ export default function BarcodeScanScreen() {
               : 'Calorie data unavailable'}
           </Text>
           <Text>{describeHealthScore(result)}</Text>
-          {/* TODO: "Add to today's log" button -> writes into meals table */}
           <Button title="Scan Another" onPress={() => { setScanned(false); setResult(null); }} />
         </View>
       )}
