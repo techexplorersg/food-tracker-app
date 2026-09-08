@@ -1,6 +1,6 @@
 // USDA FoodData Central — free public nutrition database.
 // Get a free API key (instant, no cost) at https://fdc.nal.usda.gov/api-key-signup.html
-const USDA_API_KEY = 'YOUR-FREE-USDA-KEY';
+const USDA_API_KEY = 'hzb9BIADcPR7PdEeon6ivitgeFOk2Ty5BRMhmiud';
 const BASE_URL = 'https://api.nal.usda.gov/fdc/v1';
 
 export interface UsdaFoodMatch {
