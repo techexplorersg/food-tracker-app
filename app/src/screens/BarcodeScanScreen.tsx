@@ -17,7 +17,7 @@ export default function BarcodeScanScreen() {
     setResult(product);
   }
 
-  if (!permission) return <Text>Loading camera permissions...</Text>;
+  if (!permission) return <Text style={{ fontSize: 24, marginTop: 100 }}>TESTING - LOADING PERMISSIONS</Text>;
   if (!permission.granted) {
     return (
       <View style={styles.container}>
