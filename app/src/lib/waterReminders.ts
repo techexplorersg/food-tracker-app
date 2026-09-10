@@ -5,8 +5,6 @@ Notifications.setNotificationHandler({
     shouldShowAlert: true,
     shouldPlaySound: false,
     shouldSetBadge: false,
-    shouldShowBanner: true,
-    shouldShowList: true,
   }),
 });
 
@@ -27,7 +25,6 @@ export async function scheduleWaterReminders(intervalMinutes = 120) {
       body: "Keep your hydration on track — take a moment for a glass of water.",
     },
     trigger: {
-      type: Notifications.SchedulableTriggerInputTypes.TIME_INTERVAL,
       seconds: intervalMinutes * 60,
       repeats: true,
     },
