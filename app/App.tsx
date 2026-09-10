@@ -7,6 +7,7 @@ import CameraScreen from './src/screens/CameraScreen';
 import BarcodeScanScreen from './src/screens/BarcodeScanScreen';
 import SettingsScreen from './src/screens/SettingsScreen';
 import { scheduleWaterReminders } from './src/lib/waterReminders';
+import { ensureSignedIn } from './src/lib/auth';
 
 export type RootStackParamList = {
   MealLog: undefined;
@@ -19,7 +20,7 @@ const Stack = createNativeStackNavigator<RootStackParamList>();
 
 export default function App() {
   useEffect(() => {
-    // Local-only notifications — no backend involved, no cost.
+    ensureSignedIn().catch((e) => console.log('Sign-in error:', e.message));
     scheduleWaterReminders();
   }, []);
 
