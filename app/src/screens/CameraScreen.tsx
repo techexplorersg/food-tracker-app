@@ -1,40 +1,97 @@
 import React, { useState } from 'react';
-import { View, Text, Button, Image, StyleSheet, FlatList } from 'react-native';
+import {
+  View,
+  Text,
+  Button,
+  Image,
+  StyleSheet,
+  FlatList,
+  TextInput,
+  TouchableOpacity,
+  Alert,
+  ActivityIndicator,
+} from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
+import { useNavigation } from '@react-navigation/native';
 
-import { classifyFood, ClassificationCandidate } from '../lib/foodClassifier';
+import { classifyFood } from '../lib/foodClassifier';
+import { createMealWithItems } from '../lib/mealService';
 import { FoodItem } from '../types';
 
-/**
- * Lets the user take/upload one or more photos of a meal (e.g. main plate,
- * side dish, dessert), runs the on-device classifier on each, and hands off
- * to a confirm/edit step before saving. See ARCHITECTURE.md hard part #1 —
- * portion size here is always a user-confirmed estimate, never treated as
- * an exact measurement.
- */
+// Rough starting-point calories/100g for common detected labels, used only
+// until the user picks a real USDA match. See lib/usda.ts for real lookups
+// — wiring per-item USDA search into this screen is a good next iteration.
+const FALLBACK_CALORIES_PER_100G: Record<string, number> = {
+  'grilled chicken breast': 165,
+  'steamed rice': 130,
+  broccoli: 34,
+};
+
 export default function CameraScreen() {
+  const navigation = useNavigation();
   const [photos, setPhotos] = useState<string[]>([]);
-  const [candidates, setCandidates] = useState<ClassificationCandidate[]>([]);
+  const [items, setItems] = useState<FoodItem[]>([]);
+  const [saving, setSaving] = useState(false);
 
-  async function takePhoto() {
-    const result = await ImagePicker.launchCameraAsync({ quality: 0.6 });
-    if (!result.canceled) {
-      const uri = result.assets[0].uri;
-      setPhotos((prev) => [...prev, uri]);
-      const detected = await classifyFood(uri);
-      setCandidates((prev) => [...prev, ...detected]);
+  async function addPhotoAndClassify(pickFn: () => Promise<ImagePicker.ImagePickerResult>) {
+    const result = await pickFn();
+    if (result.canceled) return;
+
+    const uri = result.assets[0].uri;
+    setPhotos((prev) => [...prev, uri]);
+
+    const detected = await classifyFood(uri);
+    const newItems: FoodItem[] = detected.map((d) => ({
+      name: d.label,
+      estimatedGrams: 100,
+      caloriesPer100g: FALLBACK_CALORIES_PER_100G[d.label] ?? 100,
+      source: 'manual',
+    }));
+    setItems((prev) => [...prev, ...newItems]);
+  }
+
+  const takePhoto = () =>
+    addPhotoAndClassify(() => ImagePicker.launchCameraAsync({ quality: 0.6 }));
+  const pickFromLibrary = () =>
+    addPhotoAndClassify(() => ImagePicker.launchImageLibraryAsync({ quality: 0.6 }));
+
+  function updateGrams(index: number, grams: string) {
+    const value = parseInt(grams, 10);
+    setItems((prev) =>
+      prev.map((item, i) => (i === index ? { ...item, estimatedGrams: isNaN(value) ? 0 : value } : item))
+    );
+  }
+
+  function removeItem(index: number) {
+    setItems((prev) => prev.filter((_, i) => i !== index));
+  }
+
+  function addMissedItem() {
+    setItems((prev) => [
+      ...prev,
+      { name: 'New item — tap to rename in a future update', estimatedGrams: 100, caloriesPer100g: 100, source: 'manual' },
+    ]);
+  }
+
+  async function handleConfirm() {
+    if (items.length === 0) {
+      Alert.alert('No items', 'Add at least one food item before saving.');
+      return;
+    }
+    setSaving(true);
+    try {
+      await createMealWithItems(items);
+      navigation.goBack();
+    } catch (e: any) {
+      Alert.alert('Could not save meal', e.message ?? 'Unknown error');
+    } finally {
+      setSaving(false);
     }
   }
 
-  async function pickFromLibrary() {
-    const result = await ImagePicker.launchImageLibraryAsync({ quality: 0.6 });
-    if (!result.canceled) {
-      const uri = result.assets[0].uri;
-      setPhotos((prev) => [...prev, uri]);
-      const detected = await classifyFood(uri);
-      setCandidates((prev) => [...prev, ...detected]);
-    }
-  }
+  const totalCalories = Math.round(
+    items.reduce((sum, item) => sum + (item.caloriesPer100g / 100) * item.estimatedGrams, 0)
+  );
 
   return (
     <View style={styles.container}>
@@ -47,30 +104,50 @@ export default function CameraScreen() {
         <Button title="Upload Photo" onPress={pickFromLibrary} />
       </View>
 
-      <FlatList
-        data={photos}
-        horizontal
-        keyExtractor={(uri) => uri}
-        renderItem={({ item }) => (
-          <Image source={{ uri: item }} style={styles.thumb} />
-        )}
-      />
+      {photos.length > 0 && (
+        <FlatList
+          data={photos}
+          horizontal
+          keyExtractor={(uri) => uri}
+          renderItem={({ item }) => <Image source={{ uri: item }} style={styles.thumb} />}
+          style={{ marginBottom: 12 }}
+        />
+      )}
 
-      {candidates.length > 0 && (
-        <View style={styles.candidates}>
-          <Text style={styles.sectionTitle}>Detected — confirm below:</Text>
-          {candidates.map((c, i) => (
-            <Text key={i}>
-              {c.label} ({Math.round(c.confidence * 100)}% confidence)
-            </Text>
-          ))}
-          {/*
-            TODO (Phase 3, see ROADMAP.md): render an editable portion-size
-            slider per candidate, let the user delete wrong detections and
-            add missed ones, then compute calories via nutrition.ts and
-            save the Meal to Supabase.
-          */}
-        </View>
+      {items.length > 0 && (
+        <>
+          <Text style={styles.sectionTitle}>Confirm what's in this meal:</Text>
+          <FlatList
+            data={items}
+            keyExtractor={(_, i) => String(i)}
+            renderItem={({ item, index }) => (
+              <View style={styles.itemRow}>
+                <Text style={styles.itemName} numberOfLines={1}>
+                  {item.name}
+                </Text>
+                <TextInput
+                  style={styles.gramsInput}
+                  keyboardType="number-pad"
+                  value={String(item.estimatedGrams)}
+                  onChangeText={(v) => updateGrams(index, v)}
+                />
+                <Text style={styles.gramsLabel}>g</Text>
+                <TouchableOpacity onPress={() => removeItem(index)}>
+                  <Text style={styles.removeButton}>✕</Text>
+                </TouchableOpacity>
+              </View>
+            )}
+          />
+          <Button title="+ Add missed item" onPress={addMissedItem} />
+
+          <Text style={styles.total}>~{totalCalories} kcal total</Text>
+
+          {saving ? (
+            <ActivityIndicator style={{ marginTop: 16 }} />
+          ) : (
+            <Button title="Save Meal" onPress={handleConfirm} />
+          )}
+        </>
       )}
     </View>
   );
@@ -81,6 +158,24 @@ const styles = StyleSheet.create({
   hint: { marginBottom: 12, color: '#555' },
   buttonRow: { flexDirection: 'row', justifyContent: 'space-around', marginBottom: 16 },
   thumb: { width: 80, height: 80, marginRight: 8, borderRadius: 8 },
-  candidates: { marginTop: 20 },
   sectionTitle: { fontWeight: '600', marginBottom: 8 },
+  itemRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: '#eee',
+  },
+  itemName: { flex: 1 },
+  gramsInput: {
+    borderWidth: 1,
+    borderColor: '#ccc',
+    borderRadius: 6,
+    width: 60,
+    padding: 6,
+    textAlign: 'center',
+  },
+  gramsLabel: { marginLeft: 4, marginRight: 12, color: '#666' },
+  removeButton: { color: '#c00', fontSize: 18, paddingHorizontal: 6 },
+  total: { fontSize: 18, fontWeight: '700', marginVertical: 12, textAlign: 'center' },
 });

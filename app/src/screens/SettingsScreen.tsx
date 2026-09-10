@@ -1,16 +1,40 @@
-import React, { useState } from 'react';
-import { View, Text, TextInput, Button, StyleSheet } from 'react-native';
+import React, { useState, useEffect } from 'react';
+import { View, Text, TextInput, Button, StyleSheet, ActivityIndicator, Alert } from 'react-native';
 
 import { scheduleWaterReminders } from '../lib/waterReminders';
+import { fetchSettings, saveSettings } from '../lib/settingsService';
 
 export default function SettingsScreen() {
   const [dailyLimit, setDailyLimit] = useState('2000');
   const [waterInterval, setWaterInterval] = useState('120');
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    fetchSettings()
+      .then((s) => {
+        setDailyLimit(String(s.dailyCalorieLimit));
+        setWaterInterval(String(s.waterReminderIntervalMinutes));
+      })
+      .finally(() => setLoading(false));
+  }, []);
 
   async function save() {
-    // TODO: persist to Supabase `user_settings` table (see backend/schema.sql)
-    await scheduleWaterReminders(parseInt(waterInterval, 10));
+    setSaving(true);
+    try {
+      const limit = parseInt(dailyLimit, 10) || 2000;
+      const interval = parseInt(waterInterval, 10) || 120;
+      await saveSettings({ dailyCalorieLimit: limit, waterReminderIntervalMinutes: interval });
+      await scheduleWaterReminders(interval);
+      Alert.alert('Saved', 'Your settings were updated.');
+    } catch (e: any) {
+      Alert.alert('Could not save', e.message ?? 'Unknown error');
+    } finally {
+      setSaving(false);
+    }
   }
+
+  if (loading) return <ActivityIndicator style={{ marginTop: 40 }} />;
 
   return (
     <View style={styles.container}>
@@ -30,7 +54,9 @@ export default function SettingsScreen() {
         onChangeText={setWaterInterval}
       />
 
-      <Button title="Save" onPress={save} />
+      <View style={{ marginTop: 20 }}>
+        {saving ? <ActivityIndicator /> : <Button title="Save" onPress={save} />}
+      </View>
     </View>
   );
 }

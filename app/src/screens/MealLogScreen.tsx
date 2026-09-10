@@ -1,25 +1,64 @@
-import React, { useState } from 'react';
-import { View, Text, Button, FlatList, StyleSheet } from 'react-native';
+import React, { useState, useCallback } from 'react';
+import { View, Text, Button, FlatList, StyleSheet, RefreshControl } from 'react-native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
+import { useFocusEffect } from '@react-navigation/native';
 
 import { RootStackParamList } from '../../App';
-import { Meal, UserSettings } from '../types';
-import { calculateDailyTotal, remainingCalories } from '../lib/nutrition';
+import { Meal, PackagedFoodScanResult, UserSettings } from '../types';
+import { calculateDailyTotal } from '../lib/nutrition';
+import { fetchTodaysMeals } from '../lib/mealService';
+import { fetchTodaysScans } from '../lib/scanService';
+import { fetchSettings } from '../lib/settingsService';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'MealLog'>;
 
-// TODO: replace with real data fetched from Supabase (meals for today).
-const mockMeals: Meal[] = [];
-const mockSettings: UserSettings = {
-  dailyCalorieLimit: 2000,
-  waterReminderIntervalMinutes: 120,
-};
+type LogRow = { key: string; label: string; calories: number };
 
 export default function MealLogScreen({ navigation }: Props) {
-  const [meals] = useState<Meal[]>(mockMeals);
+  const [meals, setMeals] = useState<Meal[]>([]);
+  const [scans, setScans] = useState<PackagedFoodScanResult[]>([]);
+  const [settings, setSettings] = useState<UserSettings>({
+    dailyCalorieLimit: 2000,
+    waterReminderIntervalMinutes: 120,
+  });
+  const [loading, setLoading] = useState(false);
 
-  const total = calculateDailyTotal(meals);
-  const remaining = remainingCalories(mockSettings.dailyCalorieLimit, meals);
+  const loadData = useCallback(async () => {
+    setLoading(true);
+    try {
+      const [m, s, cfg] = await Promise.all([fetchTodaysMeals(), fetchTodaysScans(), fetchSettings()]);
+      setMeals(m);
+      setScans(s);
+      setSettings(cfg);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  // Refresh every time this screen comes back into focus (e.g. after saving a meal)
+  useFocusEffect(
+    useCallback(() => {
+      loadData();
+    }, [loadData])
+  );
+
+  const mealCalories = calculateDailyTotal(meals);
+  const scanCalories = scans.reduce((sum, s) => sum + (s.caloriesPer100g ?? 0), 0);
+  const total = mealCalories + scanCalories;
+  const remaining = settings.dailyCalorieLimit - total;
+
+  const rows: LogRow[] = [
+    ...meals.map((m) => ({
+      key: m.id,
+      label: m.items.map((i) => i.name).join(', ') || 'Meal',
+      calories: m.totalCalories,
+    })),
+    ...scans.map((s, i) => ({
+      key: `scan-${i}`,
+      label: s.productName,
+      calories: Math.round(s.caloriesPer100g ?? 0),
+    })),
+  ];
 
   return (
     <View style={styles.container}>
@@ -36,15 +75,18 @@ export default function MealLogScreen({ navigation }: Props) {
       </View>
 
       <FlatList
-        data={meals}
-        keyExtractor={(m) => m.id}
+        data={rows}
+        keyExtractor={(row) => row.key}
+        refreshControl={<RefreshControl refreshing={loading} onRefresh={loadData} />}
         renderItem={({ item }) => (
           <View style={styles.mealRow}>
-            <Text>{item.items.map((i) => i.name).join(', ')}</Text>
-            <Text>{item.totalCalories} kcal</Text>
+            <Text style={{ flex: 1 }} numberOfLines={1}>
+              {item.label}
+            </Text>
+            <Text>{item.calories} kcal</Text>
           </View>
         )}
-        ListEmptyComponent={<Text style={styles.empty}>No meals logged yet today.</Text>}
+        ListEmptyComponent={<Text style={styles.empty}>No meals logged yet today. Pull down to refresh.</Text>}
       />
 
       <Button title="Settings" onPress={() => navigation.navigate('Settings')} />
